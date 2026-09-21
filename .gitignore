@@ -1,0 +1,21 @@
+# Saját beállítások: e-mail cím, MAC, SSH-hoszt. SOHA ne kerüljön repóba.
+config.sh
+
+# Python környezet és fordítási maradék.
+# A .pyc fájlok a forrás konstansait is tartalmazzák (MAC-cím, abszolút útvonal),
+# ezért nem elég a forrást megtisztítani.
+.venv/
+__pycache__/
+*.py[cod]
+
+# Futási napló: a készülék MAC-címét és háztartási időbélyeg-mintát tartalmaz.
+mosas.log
+
+# Aláírt Parancsok-fájlok. A binárisban benne van a hoszt, a felhasználónév és
+# a teljes útvonal — és ami veszélyesebb: egy az APPBÓL exportált példány az
+# SSH PRIVÁT KULCSOT is magával viszi. Kívülről nem lehet megkülönböztetni.
+# A parancs_keszito.py bármikor újragenerálja őket.
+parancsok/
+
+# macOS
+.DS_Store

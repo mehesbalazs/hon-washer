@@ -1,0 +1,3 @@
+# A pyhOn karbantartott forkja. Az eredeti pyhOn 2024-08-14 óta nem frissül.
+# Python 3.10+ szükséges (a projekt 3.12-vel készült).
+pyhon-revived==0.19.2
