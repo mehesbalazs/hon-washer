@@ -1,4 +1,4 @@
-# Mosógép lekérdező (Candy/Hoover/Haier hOn)
+# Mosógép távvezérlés (Candy/Hoover/Haier hOn)
 
 Lekérdezés és távoli programindítás Candy/Hoover/Haier mosógéphez, a hOn
 felhő API-n keresztül — terminálból és iPhone-ról egyaránt.
@@ -15,9 +15,16 @@ ettől eltér: az ad helyi JSON API-t a 80-as porton.)
 ## Felépítés
 
 ```
-iOS Parancsok  ──SSH──▶  mosas.sh  ──▶  indito.py  ──importál──▶  lekerdez.py
-                             │                                          │
-                             └──────────▶ mosas.log                     └──▶ hOn felhő ──▶ mosógép
+  iPhone (Parancsok app)
+        │  SSH
+        ▼
+  mosas.sh  ─────────▶  mosas.log
+        │
+        ▼
+  indito.py  ──importál──▶  lekerdez.py
+        │
+        ▼
+  hOn felhő  ─────────▶  mosógép
 ```
 
 | fájl | szerep | mikor fut |

@@ -7,9 +7,16 @@ elolvasni — arra a [README](README.md) való.
 ## Felépítés
 
 ```
-iOS Parancsok  ──SSH──▶  mosas.sh  ──▶  indito.py  ──importál──▶  lekerdez.py
-                             │                                          │
-                             └──────────▶ mosas.log                     └──▶ hOn felhő ──▶ mosógép
+  iPhone (Parancsok app)
+        │  SSH
+        ▼
+  mosas.sh  ─────────▶  mosas.log
+        │
+        ▼
+  indito.py  ──importál──▶  lekerdez.py
+        │
+        ▼
+  hOn felhő  ─────────▶  mosógép
 ```
 
 ## `lekerdez.py` — a lekérdező és a közös alap
