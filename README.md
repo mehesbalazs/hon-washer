@@ -149,6 +149,7 @@ a Remote mód. A `--igen` csak a kérdést hagyja ki, az ellenőrzéseket nem.
 | 5 | paraméter nem állítható be, vagy visszaolvasva eltér |
 | 6 | a MAC nem egyezik a várt készülékkel |
 | 7 | hálózati hiba küldés közben — **nem tudni, elindult-e**, ellenőrizd |
+| 8 | hiba **a gyártó szerverén** — a mosás **nem** indult el, nem nálad a gond; próbáld később |
 
 ## iPhone — Parancsok app
 

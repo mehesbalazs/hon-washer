@@ -112,11 +112,30 @@ legrosszabb pillanat kideríteni.
 8. begépelt `INDIT` megerősítés (a `--igen` csak ezt hagyja ki, a kapukat nem)
 9. **újabb állapotellenőrzés** — a megerősítés percekig tarthat, azalatt
    kinyithatták az ajtót vagy lejárhatott a Remote mód
-10. küldés, külön kezelve a felhő elutasítását (`ApiError`) és a hálózati hibát
+10. küldés (a `kuldes()` függvényben), külön kezelve a gyártói szerverhibát, a
+    felhő elutasítását és a hálózati hibát
 
 A 10. pont árnyalata: a könyvtár `send()` metódusa felhő-elutasításnál **nem**
 `False`-t ad vissza, hanem kivételt dob. Az eredeti kódom emiatt tracebacket
 adott volna az első elutasításnál.
+
+**`FelhoValasz` és `felho_hiba()` — a szerver saját hibaüzenete.** A pyhOn
+elutasításkor a szerver válaszát **csak naplózza**, aztán egy semmitmondó
+`ApiError("Can't send command")`-ot dob — a valódi ok így elveszne. A
+`FelhoValasz` egy naplókezelő, ami a küldés idejére feliratkozik a `pyhon`
+naplóra, és kimenti a választ. A `felho_hiba()` ebből két esetet választ szét:
+
+- **szerverhiba** (`errorType` van a válaszban) → **8-as kód**. Ilyen volt
+  2026-10-12-én: a Haier parancsküldő AWS Lambda-függvénye egy hiányos
+  frissítés miatt el sem tudott indulni
+  (`Runtime.ImportModuleError: No module named 'lib'`). Délután négyszer
+  bukott el az indítás, a hivatalos appból is — este már ment.
+- **elutasítás** (csak `resultCode`) → **4-es kód**: a felhő működik, de nem
+  fogadta el a parancsot.
+
+Mindkettő egy-egy géppel olvasható sort ír ki (`FELHO_HIBA:` /
+`FELHO_ELUTASITAS:`), ASCII jelölővel, mert SSH-munkamenetben a locale nem
+garantált. Ebből rakja össze a `mosas.sh` a telefonnak szóló mondatot.
 
 ## `mosas.sh` — a telefonos burkoló
 
@@ -131,7 +150,9 @@ kilépési kóddal. SSH-n át **ez az egyetlen ablak** arra, mi történt: a tel
 csak egy rövid mondatot lát, és ha valami elromlik, enélkül semmit nem lehetne
 kideríteni. A projekt két legnehezebb hibáját is ez a napló fejtette meg.
 
-**Kilépési kód → mondat.** A nyolc kódot emberi magyar mondatra fordítja. A
+**Kilépési kód → mondat.** A kilenc kódot emberi magyar mondatra fordítja. A
+4-esnél és a 8-asnál a felhő saját hibaüzenetét is továbbadja, így a
+telefonon látszik, hogy a te oldaladon van-e a gond, vagy a gyártóén. A
 7-es a különleges eset: hálózati hiba küldés közben, amikor **nem tudni**,
 elindult-e a mosás — ilyenkor kifejezetten figyelmeztet, hogy ellenőrizd,
 mielőtt újrapróbálnád.

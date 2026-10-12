@@ -54,6 +54,11 @@ KOD=$?
 # A részletes indoklást a script írja ki; ebből emeljük ki a lényeget.
 INDOK="$(echo "$KIMENET" | grep -E "NEM INDÍTOK|FIGYELEM|HIBA|elutasította|Nincs interaktív" | head -2 | tr '\n' ' ')"
 
+# Az indito.py géppel olvasható sora a felhő válaszáról (FELHO_HIBA /
+# FELHO_ELUTASITAS). print -r: a nyers JSON-ban lehet backslash, amit az echo
+# értelmezne.
+felho_sor() { print -r -- "$KIMENET" | grep -m1 "^$1: " | sed "s/^$1: //"; }
+
 case $KOD in
   0) if [[ "$MOD" == "proba" ]]; then
        echo "Próbamenet rendben: $NEV — a gépre semmi nem ment el."
@@ -63,10 +68,17 @@ case $KOD in
   1) echo "Nem indult — bejelentkezési hiba vagy nincs meg a készülék. $INDOK" ;;
   2) echo "Nem indult — a gép nincs készenlétben. Tekerd a tárcsát Remote állásba, csukd be az ajtót. $INDOK" ;;
   3) echo "Megszakítva, semmi nem indult el." ;;
-  4) echo "Nem indult — a hOn felhő elutasította a parancsot. $INDOK" ;;
+  4) R="$(felho_sor FELHO_ELUTASITAS)"; R="${R% | }"
+     if [[ -n "$R" ]]; then
+       echo "Nem indult — a hOn felhő elutasította a parancsot ($R)."
+     else
+       echo "Nem indult — a hOn felhő nem fogadta el a parancsot. $INDOK"
+     fi ;;
   5) echo "Nem indult — a kért és a tényleges beállítások eltérnek. $INDOK" ;;
   6) echo "Nem indult — nem a várt készülék válaszolt (MAC-eltérés)." ;;
   7) echo "BIZONYTALAN — hálózati hiba küldés közben. Lehet, hogy MÉGIS elindult, ellenőrizd a gépen, mielőtt újrapróbálnád!" ;;
+  8) T="$(felho_sor FELHO_HIBA)"; T="${T%% | *}"
+     echo "Nem indult — hiba van a Haier szerverén${T:+ ($T)}, nem nálad. Próbáld később." ;;
   *) echo "Ismeretlen hiba (kód $KOD). $INDOK" ;;
 esac
 

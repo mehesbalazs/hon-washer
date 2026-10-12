@@ -13,6 +13,8 @@ A jelszót a lekerdez.py-val azonos módon szerzi (Kulcskarika / env / bekérés
 
 import argparse
 import asyncio
+import json
+import logging
 import sys
 from pprint import pformat
 
@@ -147,6 +149,105 @@ def visszaolvasas(cmd, kert: dict) -> dict:
     return elteresek
 
 
+class FelhoValasz(logging.Handler):
+    """Elkapja a felhő válaszát, amit a pyhOn csak naplóz, de nem ad vissza.
+
+    Elutasításkor a könyvtár a szerver válaszát a naplóba írja
+    (pyhon/connection/api.py: `_LOGGER.error(await response.text())`), majd
+    egy semmitmondó `ApiError("Can't send command")`-ot dob. Ez a kezelő a
+    küldés idejére feliratkozik a naplóra, hogy a szerver saját hibaüzenete
+    ne vesszen el.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(logging.ERROR)
+        self.uzenetek: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.uzenetek.append(record.getMessage())
+
+
+def felho_hiba(uzenetek: list[str]) -> dict | None:
+    """Kikeresi a naplózott üzenetek közül a felhő JSON-válaszát.
+
+    A válaszból két esetet lehet megkülönböztetni:
+    - szerverhiba: a válaszban `errorType` van (pl. AWS Lambda
+      `Runtime.ImportModuleError`) — a gyártó oldalán romlott el valami;
+    - elutasítás: csak `resultCode` és esetleg üzenet — a felhő működik,
+      de nem fogadta el a parancsot.
+    """
+    for uzenet in uzenetek:
+        try:
+            adat = json.loads(uzenet)
+        except ValueError:
+            continue
+        payload = adat.get("payload") if isinstance(adat, dict) else None
+        if not isinstance(payload, dict):
+            continue
+        return {
+            "tipus": str(payload.get("errorType") or ""),
+            "uzenet": str(payload.get("errorMessage") or payload.get("message") or ""),
+            "kod": payload.get("resultCode"),
+            "nyers": uzenet,
+        }
+    return None
+
+
+async def kuldes(cmd, nev: str) -> int:
+    """Élesben elküldi a parancsot, és a kimenetet kilépési kódra fordítja.
+
+    A felhő válaszát két géppel olvasható sorban írja ki (`FELHO_HIBA:` és
+    `FELHO_ELUTASITAS:`), ezekből rakja össze a mosas.sh a telefonnak szóló
+    mondatot. A jelölők szándékosan ASCII-k: SSH-munkamenetben a locale nem
+    garantált.
+    """
+    naplo = logging.getLogger("pyhon")
+    fogo = FelhoValasz()
+    naplo.addHandler(fogo)
+    try:
+        # A send() felhő-elutasításnál NEM False-t ad vissza, hanem ApiError-t
+        # dob (pyhon/commands.py::send_parameters). False csak hitelesítési
+        # hibánál jön.
+        siker = await cmd.send()
+    except ApiError:
+        hiba = felho_hiba(fogo.uzenetek)
+        nyers = hiba["nyers"] if hiba else (fogo.uzenetek[0] if fogo.uzenetek else "")
+        if nyers:
+            print(f"  nyers felhőválasz: {nyers[:500]}", file=sys.stderr)
+
+        if hiba and hiba["tipus"]:
+            print(f"\nFELHO_HIBA: {hiba['tipus']} | {hiba['uzenet']}", file=sys.stderr)
+            print("A gyártó szerverén hiba van, a mosás NEM indult el. Ez nem a "
+                  "beállításod hibája — próbáld később.", file=sys.stderr)
+            return 8
+
+        if hiba:
+            sor = f"resultCode={hiba['kod']} | {hiba['uzenet']}"
+        else:
+            # Nem JSON jött (pl. egy 502-es HTML-oldal): a nyers eleje többet mond,
+            # mint egy üres resultCode.
+            sor = f"nem értelmezhető válasz | {nyers[:80]}"
+        print(f"\nFELHO_ELUTASITAS: {sor}", file=sys.stderr)
+        print("A hOn felhő elutasította a parancsot, a mosás NEM indult el.",
+              file=sys.stderr)
+        return 4
+    except Exception as e:
+        # Hálózati hiba a küldés közben: nem tudjuk, a parancs kiment-e.
+        print(f"\nHIBA küldés közben: {type(e).__name__}: {e}", file=sys.stderr)
+        print("FIGYELEM: nem tudom, a parancs kiment-e. A mosás LEHET, hogy "
+              "elindult — ellenőrizd a gépen vagy a lekerdez.py-val, "
+              "MIELŐTT újra próbálnád.", file=sys.stderr)
+        return 7
+    finally:
+        naplo.removeHandler(fogo)
+
+    if siker:
+        print(f"\nELINDÍTVA: „{nev}”")
+        return 0
+    print("\nA hitelesítés nem sikerült, a mosás nem indult el.", file=sys.stderr)
+    return 4
+
+
 async def main() -> int:
     p = argparse.ArgumentParser(description="A két rögzített mosóprogram indítása")
     p.add_argument("program", choices=sorted(PROGRAMOK), help="melyik programot")
@@ -273,27 +374,7 @@ async def main() -> int:
             print(f"\nNEM INDÍTOK: az állapot megváltozott. {uzenet_meg}", file=sys.stderr)
             return 2
 
-        # A send() felhő-elutasításnál NEM False-t ad vissza, hanem ApiError-t dob
-        # (pyhon/commands.py::send_parameters). False csak hitelesítési hibánál jön.
-        try:
-            siker = await cmd.send()
-        except ApiError as e:
-            print(f"\nA felhő ELUTASÍTOTTA a parancsot: {e}", file=sys.stderr)
-            print("A mosás NEM indult el.", file=sys.stderr)
-            return 4
-        except Exception as e:
-            # Hálózati hiba a küldés közben: nem tudjuk, a parancs kiment-e.
-            print(f"\nHIBA küldés közben: {type(e).__name__}: {e}", file=sys.stderr)
-            print("FIGYELEM: nem tudom, a parancs kiment-e. A mosás LEHET, hogy "
-                  "elindult — ellenőrizd a gépen vagy a lekerdez.py-val, "
-                  "MIELŐTT újra próbálnád.", file=sys.stderr)
-            return 7
-
-        if siker:
-            print(f"\nELINDÍTVA: „{valasztott['nev']}”")
-        else:
-            print("\nA hitelesítés nem sikerült, a mosás nem indult el.", file=sys.stderr)
-            return 4
+        return await kuldes(cmd, valasztott["nev"])
     finally:
         await hon.close()
 
