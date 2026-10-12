@@ -125,7 +125,7 @@ de elfogja a küldést, így semmi nem jut el a géphez.
 
 1. a gép online (`lastConnEvent != DISCONNECTED`)
 2. `remoteCtrValid = 1` — a tárcsa **Remote** állásban (különben megmondja, mit tegyél)
-3. `machMode = 1` — készenlét; ha épp mos vagy szünetel, elutasítja
+3. `machMode = 1` — készenlét; ha épp mos, szünetel vagy késleltetett indítás vár rá, elutasítja
 4. minden kért paraméter beállítható volt
 5. **minden kért paraméter vissza is olvasható ugyanazzal az értékkel** — a gép
    `programRules` szabályai egy későbbi paraméter beállításakor visszamenőleg

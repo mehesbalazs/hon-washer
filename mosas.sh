@@ -66,7 +66,15 @@ case $KOD in
        echo "Elindítva: $NEV"
      fi ;;
   1) echo "Nem indult — bejelentkezési hiba vagy nincs meg a készülék. $INDOK" ;;
-  2) echo "Nem indult — a gép nincs készenlétben. Tekerd a tárcsát Remote állásba, csukd be az ajtót. $INDOK" ;;
+  # A tárcsás tanács csak akkor helyes, ha a gép tényleg nincs Remote-ban;
+  # futó, szüneteltetett vagy késleltetett ciklusnál félrevezetne. A machMode-ot
+  # az indito.py „Állapot:” sora tartalmazza.
+  2) case "$(print -r -- "$KIMENET" | grep -o -m1 'machMode=[0-9]')" in
+       machMode=2) echo "Nem indult — a gép éppen mos." ;;
+       machMode=3) echo "Nem indult — a gép szüneteltetve van, a gépen folytasd." ;;
+       machMode=[45]) echo "Nem indult — már be van állítva egy késleltetett indítás, a gép visszaszámol." ;;
+       *) echo "Nem indult — a gép nincs készenlétben. Tekerd a tárcsát Remote állásba, csukd be az ajtót. $INDOK" ;;
+     esac ;;
   3) echo "Megszakítva, semmi nem indult el." ;;
   4) R="$(felho_sor FELHO_ELUTASITAS)"; R="${R% | }"
      if [[ -n "$R" ]]; then

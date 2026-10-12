@@ -33,15 +33,20 @@ konfig.betoltes()
 # Üresen hagyva az ellenőrzés kimarad.
 VART_MAC = os.environ.get("MOSOGEP_MAC", "").strip()
 
+# A Haier-firmware állapotnevei (zárójelben) az Andre0512/hon integráció
+# const.py-jából. Az 5-öst élesben igazoltuk: késleltetett indítás után a gép
+# ezt jelenti, miközben a delayTime percenként fogy.
 MACHMODE = {
-    "0": "kikapcsolva / nincs kapcsolat",
-    "1": "készenlét (Remote állás, indításra vár)",
-    "2": "MOSÁS FOLYAMATBAN",
-    "3": "szüneteltetve",
-    "4": "késleltetett indításra várakozik",
-    "5": "ciklus befejezve",
-    "6": "hiba",
-    "7": "teszt üzemmód",
+    "0": "nincs állapot / kikapcsolva",                    # NO_STATE
+    "1": "készenlét (Remote állás, indításra vár)",        # SELECTION_MODE
+    "2": "MOSÁS FOLYAMATBAN",                              # EXECUTION_MODE
+    "3": "szüneteltetve",                                  # PAUSE_MODE
+    "4": "késleltetett indítás beállítás alatt",           # DELAY_START_SELECTION_MODE
+    "5": "KÉSLELTETETT INDÍTÁS — visszaszámol",            # DELAY_START_EXECUTION_MODE
+    "6": "hiba",                                           # ERROR_MODE
+    "7": "ciklus befejezve",                               # END_MODE
+    "8": "teszt üzemmód",                                  # TEST_MODE
+    "9": "leállítás folyamatban",                          # STOP_MODE
 }
 
 # Ezeket a mezőket emeljük ki külön; a többi a --mind kapcsolóval jön.

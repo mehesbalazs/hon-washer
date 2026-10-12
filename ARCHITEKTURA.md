@@ -47,7 +47,7 @@ függvénye előbb `int()`-tel próbálkozik, ezért `"1"` értékből `1` lesz,
 `1.0` — emiatt működnek a `== "1"` alakú összehasonlítások.
 
 **`gep_kiirasa()` — a megjelenítés.** A `MACHMODE` szótár a nyers kódokat
-(`0`–`7`) magyar mondatra fordítja, így nem kell fejben tartani, hogy a `2`
+(`0`–`9`) magyar mondatra fordítja, így nem kell fejben tartani, hogy a `2`
 azt jelenti, fut a mosás. A MAC-összehasonlítás normalizál: a felhő
 kötőjellel (`10-B4-...`), a hálózat kettősponttal (`10:B4:...`) adja vissza
 ugyanazt a címet — az első verzióm emiatt tévesen „nem egyezik"-et írt.
@@ -75,7 +75,8 @@ visszaállítja az eredeti metódust, kivétel esetén is.
 
 **`allapot_ellenorzes()` — négy feltétel.** Online-e a gép, engedélyezve
 van-e a távvezérlés (`remoteCtrValid = 1`), készenlétben van-e
-(`machMode = 1`), és nem fut vagy szünetel-e épp. Egy nem nyilvánvaló
+(`machMode = 1`), és nem fut, nem szünetel, és nem vár-e rá késleltetett
+indítás (`machMode = 4/5`). Egy nem nyilvánvaló
 döntés: az online állapotot a `lastConnEvent` mezőből olvassa, **nem** a
 könyvtár `connection` tulajdonságából. Utóbbi csak csatlakozáskor
 számolódik ki, és utána már csak MQTT-esemény frissítené — amit ez a script

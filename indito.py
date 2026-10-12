@@ -91,6 +91,10 @@ def allapot_ellenorzes(gep) -> tuple[bool, str]:
         return False, "A gép ÉPPEN MOS (machMode=2). Nem küldök indítást rá."
     if mach == "3":
         return False, "A gép szüneteltetve van (machMode=3). Kézzel folytasd."
+    if mach in ("4", "5"):
+        return False, (
+            "Már be van állítva egy késleltetett indítás (machMode=%s), a gép "
+            "visszaszámol. Nem küldök rá újabbat." % mach)
     if mach != "1":
         return False, "A gép nem készenléti állapotban van: machMode=%s → %s" % (
             mach, MACHMODE.get(mach, "ismeretlen"))
