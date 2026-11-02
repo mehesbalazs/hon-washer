@@ -34,23 +34,38 @@ ettől eltér: az ad helyi JSON API-t a 80-as porton.)
 | `mosas.sh` | telefonos burkoló, naplózás | minden SSH-hívásnál |
 | `parancs_keszito.py` | a Parancsok-fájlok generálása | csak beállításkor |
 | `kulcs_hozzaadas.sh` | SSH-kulcs hozzáfűzése | csak új eszköznél |
+| `jelszo_beallitas.sh` | config.sh és jelszófájl létrehozása | csak beállításkor |
 
-Az utolsó kettő beállító eszköz: a mindennapi működés során nem fut.
+Az utolsó három beállító eszköz: a mindennapi működés során nem fut.
 
 ## Beállítás
 
 ```
-cp config.example.sh config.sh     # majd töltsd ki a saját adataiddal
 uv venv --python 3.12
 uv pip install -r requirements.txt
+./jelszo_beallitas.sh
 ```
 
-A `config.sh` verziókövetésen kívül van, és négy dolgot ad meg: a hOn fiók
-e-mail címét, a mosógép MAC-címét (ezzel ellenőrzi az indító, hogy tényleg a
-te géped válaszol-e), valamint az SSH-hoszt és -felhasználót a telefonos
-parancsokhoz. Ugyanezt a fájlt olvassa a shell és a Python is.
+A `jelszo_beallitas.sh` terminálból futtatva:
 
-A jelszó **nem** kerül a config.sh-ba — lásd a következő szakaszt.
+1. létrehozza a `config.sh`-t a mintából, az e-mail címeddel — ha már van,
+   csak az e-mail sorát írja át;
+2. a hOn jelszót a `~/.config/hon/jelszo` fájlba menti (600);
+3. kérésre a macOS Kulcskarikába is menti (`hon` szolgáltatásnéven), majd
+   visszaolvassa: ha nem ugyanaz a jelszó került oda, mint a fájlba, a
+   bejegyzést törli, mert terminálból az elsőbbséget kapna.
+
+A jelszó nem jelenik meg a képernyőn, és parancssori argumentumba sem kerül.
+Jelszócsere után is ezt kell újrafuttatni.
+
+A `config.sh` verziókövetésen kívül van, és négy dolgot ad meg: a hOn fiók
+e-mail címét (ezt a beállító tölti ki), a mosógép MAC-címét (ezzel ellenőrzi
+az indító, hogy tényleg a te géped válaszol-e; a `lekerdez.py` kiírja),
+valamint az SSH-hoszt és -felhasználót a telefonos parancsokhoz. Ugyanezt a
+fájlt olvassa a shell és a Python is. Ha később új beállítás kerül a mintába,
+a `jelszo_beallitas.sh` újrafuttatása a meglévő `config.sh`-ba is bemásolja.
+
+A jelszó **nem** kerül a config.sh-ba — lásd lentebb a Jelszó szakaszt.
 
 ## Biztonsági zár
 
@@ -64,31 +79,24 @@ Részletek: [ARCHITEKTURA.md](ARCHITEKTURA.md).
 
 ## Jelszó
 
-A script nem tárol jelszót. Sorrendben keresi:
+A script nem tárol jelszót, csak olvassa. Sorrendben keresi:
 
 1. `HON_EMAIL` / `HON_PASSWORD` környezeti változó
 2. macOS Kulcskarika — `security find-generic-password -s hon -a <email> -w`
-3. interaktív bekérés (`getpass`, a gépelés nem látszik)
-
-A Kulcskarikába így kerül be (a `-w` kapcsoló érték nélkül **bekéri** a jelszót,
-így nem marad benne a shell előzményekben):
-
-```
-security add-generic-password -s hon -a "az@email.cimed" -w
-```
+3. `~/.config/hon/jelszo` (600) — ezt a `jelszo_beallitas.sh` menti
+4. interaktív bekérés (`getpass`, a gépelés nem látszik), de csak valódi
+   terminálban — máshol beszédes hibával kilép, és a beállítóra mutat
 
 **SSH-n át a Kulcskarika NEM elérhető** — `security` 36-os kóddal bukik
 ("interakció nem engedélyezett"), mert az SSH-munkamenet más biztonsági
 kontextusban fut, és nincs, aki a hozzáférést megerősítse. A
-`set-generic-password-partition-list` sem oldja meg. Ezért kell a jelszófájl:
+`set-generic-password-partition-list` sem oldja meg. Ezért a jelszófájl a fő
+út: a telefonos parancsok mindig abból lépnek be.
 
-```
-mkdir -p ~/.config/hon && chmod 700 ~/.config/hon
-security find-generic-password -s hon -a "$E" -w > ~/.config/hon/jelszo
-chmod 600 ~/.config/hon/jelszo
-```
-
-Terminálból továbbra is a Kulcskarikából megy; a fájl csak az SSH-úthoz kell.
+A Kulcskarika nem kötelező. Ha mégis van benne `hon` bejegyzés, terminálból az
+kap elsőbbséget, ezért a beállító visszaolvassa, és eltérés esetén törli; a
+`lekerdez.py` pedig figyelmeztet, ha a Kulcskarikában és a fájlban más jelszó
+van (ez jelszócsere után fordul elő).
 
 ## Használat
 

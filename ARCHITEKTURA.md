@@ -39,6 +39,14 @@ fájl → interaktív bekérés. Minden esetben kiírja, **honnan vette** a jels
 Ez nem kozmetika: pontosan ez a sor derítette ki, hogy SSH-munkamenetben a
 Kulcskarika 36-os kóddal elbukik, és hogy a fájlos tartalék valóban beugrik.
 
+A hiányzó Kulcskarika-tételt (44-es kód) nem jelzi: a jelszófájlos
+beállításnál ez a várt eset, nem hiba. Minden más kódot igen. A fájlt akkor is
+beolvassa, ha a Kulcskarikából már jött jelszó, és ha a kettő eltér — ez
+jelszócsere után fordul elő —, figyelmeztet: terminálból a Kulcskarikáé, SSH-n
+a fájlé menne, a két út tehát máshogy viselkedne. Interaktív bekérés csak
+valódi terminálban van; SSH-n a `getpass` nem tudna mit olvasni, ezért ott
+beszédes hibával kilép, és a `jelszo_beallitas.sh`-ra mutat.
+
 **`ertek()` — típusegységesítés.** A pyhOn hol nyers értéket, hol
 `HonAttribute`, hol `HonParameter` objektumot ad vissza. Ez a pár soros
 segéd mindegyikből sztringet csinál, hogy az összehasonlítások ne dőljenek el
@@ -190,6 +198,30 @@ végződik, a hozzáfűzött kulcs **ráfolyik**, a két kulcs egyetlen értelme
 sorrá olvad, és attól **mindkettő** érvénytelen lesz — némán, mindössze annyi
 történik, hogy a bejelentkezés nem megy. Ez a hiba a projekt során egyszer
 már elő is fordult.
+
+## `jelszo_beallitas.sh` — a config.sh és a jelszófájl
+
+Beállító eszköz: egyszer kell terminálból futtatni, és jelszócsere után újra.
+
+**A config.sh e-mail sora.** Akkor is átírja, ha a fájl már létezik: aki
+előbb `cp config.example.sh config.sh`-t csinált, annak a mintacím maradna
+benne, és minden belépés a `pelda@example.com` címmel bukna. A mintába később
+bekerült beállításokat is pótolja, a hozzájuk tartozó megjegyzéssel együtt.
+Az e-mail címben a `"`, `$`, `` ` `` és `\` karaktert elutasítja, mert a
+config.sh-t a shell source-olja, és ott ezek kódként futnának.
+
+**A jelszó beolvasása.** `IFS= read -rs`, kétszer: a `-s` miatt nem látszik,
+`-r` nélkül a backslash eltűnne, `IFS=` nélkül a széli szóköz levágódna — a
+jelszó némán megcsonkulna, és csak az SSH-s belépés bukna el tőle. A fájlba a
+`printf` írja, ami beépített parancs, így a jelszó egyetlen folyamat
+argumentumlistájában sem jelenik meg.
+
+**A Kulcskarika visszaolvasása.** Kérésre a Kulcskarikába is ment
+(`security add-generic-password -U … -w`; a `-w` érték nélkül maga kéri be).
+A `security` csak azt ellenőrzi, hogy kétszer ugyanazt írtad-e be, azt nem,
+hogy a fájlba mentettet — ezért a szkript visszaolvassa, és eltérés esetén
+törli a tételt, mert terminálból az kapna elsőbbséget. Ha nem kérsz
+Kulcskarikát, de ott van egy régi tétel, a törlését ajánlja fel.
 
 ## A támogató fájlok
 

@@ -7,9 +7,11 @@ a pyhOn összes parancsküldő metódusát (lásd: parancskuldes_tiltasa).
 Jelszókezelés: a script SOHA nem tárol jelszót. Sorrendben próbálja:
   1. HON_EMAIL / HON_PASSWORD környezeti változó
   2. macOS Kulcskarika (security find-generic-password -s hon)
-  3. ~/.config/hon/jelszo fájl (600) — SSH-munkamenethez, ahol a Kulcskarika
-     36-os kóddal elbukik, mert nincs, aki a hozzáférést megerősítse
-  4. interaktív bekérés (getpass — a gépelés nem látszik, nem kerül naplóba)
+  3. ~/.config/hon/jelszo fájl (600, a jelszo_beallitas.sh menti) — SSH-n át
+     ez az egyetlen út, mert ott a Kulcskarika 36-os kóddal elbukik: nincs,
+     aki a hozzáférést megerősítse
+  4. interaktív bekérés (getpass — a gépelés nem látszik, nem kerül naplóba),
+     de csak valódi terminálban
 """
 
 import argparse
@@ -32,6 +34,10 @@ konfig.betoltes()
 # A saját gép MAC-címe a config.sh-ból — ezzel vetjük össze, amit a felhő mond.
 # Üresen hagyva az ellenőrzés kimarad.
 VART_MAC = os.environ.get("MOSOGEP_MAC", "").strip()
+
+# A jelszo_beallitas.sh ide menti a jelszót, és ezen a néven a Kulcskarikába.
+JELSZOFAJL = Path.home() / ".config" / "hon" / "jelszo"
+KULCSKARIKA = "hon"
 
 # A Haier-firmware állapotnevei (zárójelben) az Andre0512/hon integráció
 # const.py-jából. Az 5-öst élesben igazoltuk: késleltetett indítás után a gép
@@ -86,6 +92,11 @@ def parancskuldes_tiltasa() -> None:
 def belepesi_adatok(email_arg: str | None) -> tuple[str, str]:
     email = email_arg or os.environ.get("HON_EMAIL", "")
     if not email:
+        if not sys.stdin.isatty():
+            raise SystemExit(
+                "HIBA: nincs megadva a hOn fiók e-mail címe, és nincs interaktív "
+                "terminál a bekéréséhez. Futtasd egyszer terminálból: ./jelszo_beallitas.sh"
+            )
         email = input("hOn fiók e-mail címe: ").strip()
 
     jelszo = os.environ.get("HON_PASSWORD", "")
@@ -94,32 +105,50 @@ def belepesi_adatok(email_arg: str | None) -> tuple[str, str]:
     if not jelszo:
         try:
             r = subprocess.run(
-                ["security", "find-generic-password", "-s", "hon", "-a", email, "-w"],
+                ["security", "find-generic-password", "-s", KULCSKARIKA, "-a", email, "-w"],
                 capture_output=True, text=True, timeout=10,
             )
             # Csak a záró újsort vágjuk le: a jelszó elején/végén lehet szóköz.
             jelszo = r.stdout.rstrip("\n") if r.returncode == 0 else ""
             forras = "macOS Kulcskarika"
-            if r.returncode != 0:
+            # A 44-es kód azt jelenti, hogy nincs ilyen tétel — ez nem hiba,
+            # a jelszófájl a várt út. A többi kódot (pl. 36, SSH-ból) kiírjuk.
+            if r.returncode not in (0, 44):
                 print(f"  Kulcskarika nem elérhető (kód {r.returncode}): "
                       f"{r.stderr.strip()[:200]}", file=sys.stderr)
         except Exception as e:
             print(f"  Kulcskarika hiba: {type(e).__name__}: {e}", file=sys.stderr)
             jelszo = ""
 
-    # Tartalék: jelszófájl. SSH-munkamenetben a Kulcskarika 36-os kóddal elbukik
-    # ("interakció nem engedélyezett"), mert nincs, aki a hozzáférést megerősítse.
-    if not jelszo:
-        f = Path.home() / ".config" / "hon" / "jelszo"
-        if f.is_file():
-            mod = f.stat().st_mode & 0o777
-            if mod & 0o077:
-                print(f"  FIGYELEM: {f} jogosultsága {oct(mod)}, legyen 600 "
-                      f"(chmod 600 {f})", file=sys.stderr)
-            jelszo = f.read_text().rstrip("\n")
-            forras = str(f)
+    # A jelszófájl. SSH-munkamenetben a Kulcskarika 36-os kóddal elbukik
+    # ("interakció nem engedélyezett"), mert nincs, aki a hozzáférést megerősítse
+    # — ott ez az egyetlen forrás. Akkor is beolvassuk, ha már van jelszó, hogy
+    # az eltérést jelezni tudjuk.
+    fajlbol = ""
+    if JELSZOFAJL.is_file():
+        mod = JELSZOFAJL.stat().st_mode & 0o777
+        if mod & 0o077:
+            print(f"  FIGYELEM: {JELSZOFAJL} jogosultsága {oct(mod)}, legyen 600 "
+                  f"(chmod 600 {JELSZOFAJL})", file=sys.stderr)
+        fajlbol = JELSZOFAJL.read_text(encoding="utf-8").rstrip("\n")
+
+    if not jelszo and fajlbol:
+        jelszo = fajlbol
+        forras = str(JELSZOFAJL)
+    elif jelszo and fajlbol and jelszo != fajlbol and forras == "macOS Kulcskarika":
+        # Terminálból a Kulcskarika nyer, SSH-n a fájl — ha a kettő eltér, a
+        # két útvonal máshogy viselkedne. Ez jelszócsere után fordul elő.
+        print("  FIGYELEM: a Kulcskarikában és a jelszófájlban MÁS jelszó van. "
+              "Most a Kulcskarikáé megy; SSH-n a fájlé menne. "
+              "Futtasd újra: ./jelszo_beallitas.sh", file=sys.stderr)
 
     if not jelszo:
+        # SSH-n nincs terminál: a getpass ott nem tudna mit olvasni.
+        if not sys.stdin.isatty():
+            raise SystemExit(
+                "HIBA: nincs mentett jelszó, és nincs interaktív terminál a bekéréséhez. "
+                "Futtasd egyszer terminálból: ./jelszo_beallitas.sh"
+            )
         jelszo = getpass(f"hOn jelszó ({email}): ")
         forras = "interaktív bekérés"
 

@@ -8,7 +8,7 @@ amit elküldene, de nem küldi el. Éles indításhoz a --eles kapcsoló kell,
     ./indito.py --email <cím> sotetek              # próba, nem indít
     ./indito.py --email <cím> sotetek --eles       # tényleges indítás
 
-A jelszót a lekerdez.py-val azonos módon szerzi (Kulcskarika / env / bekérés).
+A jelszót a lekerdez.py-val azonos módon szerzi (env / Kulcskarika / jelszófájl / bekérés).
 """
 
 import argparse

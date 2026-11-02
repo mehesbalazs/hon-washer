@@ -1,5 +1,8 @@
 # Saját beállítások: e-mail cím, MAC, SSH-hoszt. SOHA ne kerüljön repóba.
+# A config.sh.* a jelszo_beallitas.sh átmeneti fájlját fogja; a minta
+# (config.example.sh) nem illeszkedik rá, az marad.
 config.sh
+config.sh.*
 
 # Python környezet és fordítási maradék.
 # A .pyc fájlok a forrás konstansait is tartalmazzák (MAC-cím, abszolút útvonal),

@@ -18,8 +18,7 @@ PYTHON="$MAPPA/.venv/bin/python"
 EMAIL="${HON_EMAIL:-}"
 
 if [[ -z "$EMAIL" ]]; then
-  echo "Hiányzik a HON_EMAIL. Másold a config.example.sh-t config.sh néven:"
-  echo "  cp $MAPPA/config.example.sh $MAPPA/config.sh"
+  echo "Hiányzik a HON_EMAIL. Futtasd egyszer terminálból: $MAPPA/jelszo_beallitas.sh"
   exit 66
 fi
 

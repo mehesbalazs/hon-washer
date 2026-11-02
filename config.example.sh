@@ -2,6 +2,7 @@
 #
 # Másold `config.sh` néven, és töltsd ki a saját adataiddal:
 #     cp config.example.sh config.sh
+# (A jelszo_beallitas.sh ezt meg is csinálja helyetted.)
 #
 # A config.sh verziókövetésen kívül van (lásd .gitignore), a minta viszont
 # a repóban marad. A formátum szándékosan egyszerű: a mosas.sh source-olja,
