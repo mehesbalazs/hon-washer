@@ -160,6 +160,16 @@ def ertek(parameter) -> str:
     return str(getattr(parameter, "value", parameter))
 
 
+def online(gep) -> bool:
+    """Online-e a gép a felhő utolsó kapcsolati eseménye (lastConnEvent) szerint.
+
+    A gep.connection erre nem jó: a pyhOn a gép-objektum létrehozásakor számolja
+    ki, amikor az attribútumok még üresek (pyhon/appliance.py), ezért mindig
+    True — utána csak MQTT-esemény frissítené, amit ez a script nem használ.
+    """
+    return (gep.attributes or {}).get("lastConnEvent", {}).get("category", "") != "DISCONNECTED"
+
+
 def keret(cim: str) -> None:
     print()
     print("=" * 66)
@@ -182,7 +192,7 @@ def gep_kiirasa(gep, args) -> None:
         print("  MAC-ellenőrzés  : EGYEZIK a beállított készülékkel")
     else:
         print(f"  MAC-ellenőrzés  : NEM egyezik — a várt cím {VART_MAC}")
-    print(f"  Kapcsolat       : {'online' if gep.connection else 'OFFLINE'}")
+    print(f"  Kapcsolat       : {'online' if online(gep) else 'OFFLINE'}")
 
     attrs = gep.attributes or {}
     params = attrs.get("parameters", {})
@@ -301,7 +311,7 @@ async def main() -> int:
             print(json.dumps(
                 [{"brand": g.brand, "model": g.model_name, "nick": g.nick_name,
                   "mac": g.mac_address, "type": g.appliance_type,
-                  "connection": g.connection, "data": g.data} for g in hon.appliances],
+                  "connection": online(g), "data": g.data} for g in hon.appliances],
                 ensure_ascii=False, indent=2, default=str))
         else:
             print(f"\n{len(hon.appliances)} készülék a fiókban.")

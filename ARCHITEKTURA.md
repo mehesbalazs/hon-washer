@@ -60,6 +60,11 @@ azt jelenti, fut a mosás. A MAC-összehasonlítás normalizál: a felhő
 kötőjellel (`10-B4-...`), a hálózat kettősponttal (`10:B4:...`) adja vissza
 ugyanazt a címet — az első verzióm emiatt tévesen „nem egyezik"-et írt.
 
+**`online()` — a kapcsolat állapota.** A felhő utolsó kapcsolati eseményéből
+(`lastConnEvent`) dönti el, online-e a gép, nem a könyvtár `connection`
+tulajdonságából — az mindig `True`, ezért a lekérdezés korábban kikapcsolt
+gépnél is „online”-t írt (a miértje lentebb, az `allapot_ellenorzes()`-nél).
+
 Kapcsolók: `--mind` (minden állapotparaméter), `--programok` (mind a 118),
 `--kedvencek` (a saját mentett programok teljes paraméterkészlettel),
 `--statisztika`, `--json`.
@@ -86,8 +91,9 @@ van-e a távvezérlés (`remoteCtrValid = 1`), készenlétben van-e
 (`machMode = 1`), és nem fut, nem szünetel, és nem vár-e rá késleltetett
 indítás (`machMode = 4/5`). Egy nem nyilvánvaló
 döntés: az online állapotot a `lastConnEvent` mezőből olvassa, **nem** a
-könyvtár `connection` tulajdonságából. Utóbbi csak csatlakozáskor
-számolódik ki, és utána már csak MQTT-esemény frissítené — amit ez a script
+könyvtár `connection` tulajdonságából. Utóbbit a könyvtár a gép-objektum
+létrehozásakor számolja ki, még üres attribútumokból — ezért mindig `True` —,
+és utána már csak MQTT-esemény frissítené — amit ez a script
 szándékosan nem használ, mert egyszeri lekérdezést akarunk, nem tartós
 kapcsolatot.
 
