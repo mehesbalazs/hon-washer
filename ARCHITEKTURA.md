@@ -115,18 +115,40 @@ megtagadja magát. A jelenlegi két programnak nincs ilyen szabálya — de egy
 firmware- vagy programfrissítés bármikor behozhatja, és épp az élesítés a
 legrosszabb pillanat kideríteni.
 
+**`kesleltetes()` — mikor induljon, hogy időre végezzen.** A `delayTime` az
+indulásig számol (a bizonyítékok a README-ben), ezért a terv: indulás =
+befejezés − futásidő, a gép lépésközére (30 perc) lefelé kerekítve, hogy inkább
+korábban végezzen, mint később. Ha ma már nem fér bele, a holnapi időpontra
+számol. Az időpontokat az `.astimezone()` a saját napjuk helyi idejében adja
+vissza, így egy közbeeső óraátállítás sem csúsztatja el őket. A késleltetés
+ugyanúgy kért paraméter, mint a többi: a visszaolvasás rá is vonatkozik.
+
+**`futasido_tanulas()` és `futasido()` — a mért futásidő.** A gép a program
+hosszát csak indítás után jelenti (`remainingTimeMM`), és az is alábecslés. A
+valódi futásidőhöz két időbélyeg kell: a legutóbbi `startProgram` parancs
+végrehajtása az előzményből, plusz a késleltetése, és az, amikor a ciklus fázisa
+(`prPhase`) utoljára 0-ra váltott — a felhő minden mezőhöz megőrzi a legutóbbi
+változás idejét. A mérés csak akkor számít, ha a parancs pontosan az egyik
+rögzített program volt, a gép már nem mos és nem vár indulásra, és az eredmény
+20 és 300 perc közé esik. A terv alapja programonként a legutóbbi 10 mérés
+mediánja. Ha egy késleltetett mosás épp a késleltetés lejártakor ért véget,
+figyelmeztet: az arra utalna, hogy a `delayTime` mégis a befejezésig számol.
+
 **A `main()` sorrendje**, mert ez adja a tényleges biztonságot:
 
 1. bejelentkezés (hiba esetén lezárja a kapcsolatot, nem szivárog session)
-2. mosógép kiválasztása — **több gépnél inkább nem indít**, hanem kilistázza őket
+2. mosógép kiválasztása — **több gépnél inkább nem indít**, hanem kilistázza
+   őket —, majd a legutóbbi mosás futásidejének mérése
 3. állapotellenőrzés
-4. program és paraméterek beállítása, majd visszaolvasás
+4. program és paraméterek beállítása — `--vege` esetén a késleltetéssel együtt —,
+   majd visszaolvasás
 5. **mindig lefut a próbamenet**, és kiírja a payloadot
 6. `--eles` nélkül itt megáll
 7. hat kapu: állapot, hiányzó paraméter, visszaolvasási eltérés, MAC-egyezés
 8. begépelt `INDIT` megerősítés (a `--igen` csak ezt hagyja ki, a kapukat nem)
 9. **újabb állapotellenőrzés** — a megerősítés percekig tarthat, azalatt
-   kinyithatták az ajtót vagy lejárhatott a Remote mód
+   kinyithatták az ajtót vagy lejárhatott a Remote mód; ugyanezért a
+   késleltetést is újraszámolja
 10. küldés (a `kuldes()` függvényben), külön kezelve a gyártói szerverhibát, a
     felhő elutasítását és a hálózati hibát
 
@@ -158,14 +180,18 @@ Fordítóréteg a Parancsok app és a Python között. Három feladata van.
 
 **Argumentumból beállítás.** A `sotetek` / `sanitizer` kulcsból nevet és
 kapcsolókat képez. `proba` módban elhagyja az `--eles --igen` párost, így az
-indítás lehetetlen — ez a teszt-parancs alapja.
+indítás lehetetlen — ez a teszt-parancs alapja. Egy `ÓÓ:PP` alakú szó (pl.
+`16:00`) `--vege` kapcsolóként megy tovább az indítónak.
 
 **Naplózás.** A teljes kimenetet a `mosas.log`-ba fűzi, időbélyeggel és
 kilépési kóddal. SSH-n át **ez az egyetlen ablak** arra, mi történt: a telefon
 csak egy rövid mondatot lát, és ha valami elromlik, enélkül semmit nem lehetne
 kideríteni. A projekt két legnehezebb hibáját is ez a napló fejtette meg.
 
-**Kilépési kód → mondat.** A kilenc kódot emberi magyar mondatra fordítja. A
+**Kilépési kód → mondat.** A tíz kódot emberi magyar mondatra fordítja.
+Késleltetett indításnál az indító `KESLELTETES:` sorából (nap, indulás, várható
+vége, a mérések száma) mondja meg, mikor indul és mikor végez, és ha a
+futásidő még csak becsült, azt is jelzi. A
 4-esnél és a 8-asnál a felhő saját hibaüzenetét is továbbadja, így a
 telefonon látszik, hogy a te oldaladon van-e a gond, vagy a gyártóén. A
 7-es a különleges eset: hálózati hiba küldés közben, amikor **nem tudni**,
@@ -191,6 +217,9 @@ művelet kimenetét kell odailleszteni.
 Végül a `shortcuts sign -m anyone` aláírja a fájlt, hogy bármelyik eszközön
 importálható legyen. A `cimke` mező azért van külön a `nev`-től, hogy a
 fájlnév eltérhessen a program nevétől (a próba-parancs neve `Mosás - Próba`).
+A `vege` mezős bejegyzések (`Mosás Darks 16:00`, `Mosás Sanitizer 16:00`) az
+időpontot is átadják a szkriptnek, és a megerősítő kérdés is erre kérdez rá —
+„-ig” raggal, mert az minden időponthoz illik, a „-ra/-re” nem.
 
 ## `kulcs_hozzaadas.sh` — SSH-kulcs biztonságos hozzáfűzése
 

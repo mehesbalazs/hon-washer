@@ -7,6 +7,7 @@ amit elküldene, de nem küldi el. Éles indításhoz a --eles kapcsoló kell,
 
     ./indito.py --email <cím> sotetek              # próba, nem indít
     ./indito.py --email <cím> sotetek --eles       # tényleges indítás
+    ./indito.py --email <cím> sotetek --vege 16:00 # késleltetve, 16:00-ig végez (próba)
 
 A jelszót a lekerdez.py-val azonos módon szerzi (env / Kulcskarika / jelszófájl / bekérés).
 """
@@ -15,8 +16,12 @@ import argparse
 import asyncio
 import json
 import logging
+import statistics
 import sys
+from datetime import datetime, time as idopont, timedelta
+from pathlib import Path
 from pprint import pformat
+from typing import NamedTuple
 
 from pyhon import Hon
 from pyhon.connection.api import HonAPI
@@ -25,19 +30,29 @@ from pyhon.parameter.enum import HonParameterEnum, clean_value
 
 from lekerdez import belepesi_adatok, ertek, keret, MACHMODE, VART_MAC
 
-# A --kedvencek lekérdezésből kiolvasott, ellenőrzött paraméterek.
+# A --kedvencek lekérdezésből kiolvasott, ellenőrzött paraméterek. A
+# becsles_perc csak addig kell a késleltetett indításhoz, amíg nincs mért
+# futásidő (lásd futasido()); inkább hosszabb legyen: akkor korábban végez.
 PROGRAMOK = {
     "sanitizer": {
         "azonosito": "iot_wash_baby_sanitizer",
         "nev": "Sanitizer",
         "parameterek": {"temp": 60, "spinSpeed": 1000, "hygiene": 1, "extraRinse1": 1},
+        "becsles_perc": 150,
     },
     "sotetek": {
         "azonosito": "iot_wash_dark",
         "nev": "Sötétek",
         "parameterek": {"temp": 30, "spinSpeed": 800},
+        "becsles_perc": 100,
     },
 }
+
+# A mért futásidők programonként. A gép a program hosszát előre nem árulja el
+# (a katalógusban nincs ilyen mező), indításkor pedig csak becsül: a Darks-nál
+# 77 percet mondott, és 95 alatt végzett. Ezért a tényleges futásokat mérjük.
+FUTASIDO_FAJL = Path.home() / ".config" / "hon" / "futasidok.json"
+MERESEK_SZAMA = 10
 
 
 class Proba:
@@ -153,6 +168,145 @@ def visszaolvasas(cmd, kert: dict) -> dict:
     return elteresek
 
 
+class Terv(NamedTuple):
+    """Késleltetett indítás: a delayTime (perc), az indulás, a várható vége és
+    hogy az indulás „ma” vagy „holnap” van."""
+
+    keses: int
+    indulas: datetime
+    vege: datetime
+    nap: str
+
+
+def idopont_arg(szoveg: str) -> idopont:
+    try:
+        return datetime.strptime(szoveg, "%H:%M").time()
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"ÓÓ:PP alakban kell, pl. 16:00 (nem: {szoveg!r})")
+
+
+def futasidok() -> dict:
+    try:
+        return json.loads(FUTASIDO_FAJL.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def melyik_program(program_nev: str, parameterek: dict) -> str | None:
+    """A PROGRAMOK kulcsa, ha a parancs pontosan az egyik rögzített program volt."""
+    azonosito = program_nev.rsplit(".", 1)[-1].lower()
+    for kulcs, prog in PROGRAMOK.items():
+        if prog["azonosito"] == azonosito and all(
+                clean_value(parameterek.get(k, "")) == clean_value(v)
+                for k, v in prog["parameterek"].items()):
+            return kulcs
+    return None
+
+
+async def futasido_tanulas(hon, gep) -> None:
+    """Megméri a legutóbbi, már befejeződött mosás tényleges futásidejét.
+
+    Kezdet: a legutóbbi startProgram parancs végrehajtásának ideje, plusz a
+    késleltetése. Vég: amikor a ciklus fázisa (prPhase) utoljára 0-ra váltott —
+    a felhő minden mezőhöz megőrzi a legutóbbi változás idejét. Csak a két
+    rögzített program számít, ugyanazokkal a beállításokkal, és csak a 20–300
+    perc közötti eredmény: egy közben kézzel indított vagy szüneteltetett mosás
+    így legfeljebb egy kiugró mérés, amit a futasido() mediánja elnyel.
+    """
+    try:
+        elozmeny = await hon.api.load_command_history(gep) or []
+    except Exception as e:
+        print(f"  (a parancs-előzmény nem olvasható: {type(e).__name__}: {e})", file=sys.stderr)
+        return
+    utolso = next((t for t in elozmeny
+                   if t.get("command", {}).get("commandName") == "startProgram"), None)
+    if utolso is None or not utolso.get("timestampExecuted"):
+        return
+    parancs = utolso["command"]
+    parameterek = parancs.get("parameters", {})
+    kulcs = melyik_program(parancs.get("programName", ""), parameterek)
+    attr = (gep.attributes or {}).get("parameters", {})
+    fazis = attr.get("prPhase")
+    if kulcs is None or fazis is None or ertek(fazis) != "0" or fazis.last_update is None:
+        return
+    if ertek(attr.get("machMode", "")) in ("2", "3", "4", "5"):
+        return  # még fut, szünetel vagy a késleltetett indulásra vár
+
+    vegrehajtva = datetime.fromisoformat(utolso["timestampExecuted"])
+    keses = int(float(parameterek.get("delayTime") or 0))
+    kezdet = vegrehajtva + timedelta(minutes=keses)
+    perc = round((fazis.last_update - kezdet).total_seconds() / 60)
+    if not 20 <= perc <= 300:
+        if keses and abs(perc) < 20:
+            # Ha a delayTime a befejezésig számolna, a mosás épp a késleltetés
+            # lejártakor érne véget — ezt érdemes látni a naplóban.
+            print(f"  FIGYELEM: a késleltetett mosás a késleltetés lejártakor ért véget "
+                  f"({perc:+} perc). Lehet, hogy a delayTime ezen a gépen a befejezésig számol.",
+                  file=sys.stderr)
+        return
+
+    adat = futasidok()
+    bejegyzes = adat.get(kulcs, {})
+    if bejegyzes.get("parameterek") != PROGRAMOK[kulcs]["parameterek"]:
+        bejegyzes = {"parameterek": PROGRAMOK[kulcs]["parameterek"], "meresek": []}
+    azon = kezdet.isoformat(timespec="seconds")
+    if any(m.get("kezdet") == azon for m in bejegyzes["meresek"]):
+        return  # ezt a mosást már megmértük
+    bejegyzes["meresek"] = (bejegyzes["meresek"] + [{"kezdet": azon, "perc": perc}])[-MERESEK_SZAMA:]
+    adat[kulcs] = bejegyzes
+    FUTASIDO_FAJL.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    FUTASIDO_FAJL.write_text(json.dumps(adat, ensure_ascii=False, indent=2) + "\n",
+                             encoding="utf-8")
+    print(f"  futásidő megjegyezve: {PROGRAMOK[kulcs]['nev']} {perc} perc "
+          f"({len(bejegyzes['meresek'])} mérés)", file=sys.stderr)
+
+
+def futasido(kulcs: str) -> tuple[int, int]:
+    """A program várható hossza percben, és hány mérésből jön (0: becslés).
+
+    Medián, nem számtani átlag: egy szüneteltetett vagy közben kézzel indított
+    mosás kiugró mérése így nem húzza el a tervet.
+    """
+    prog = PROGRAMOK[kulcs]
+    bejegyzes = futasidok().get(kulcs, {})
+    meresek = []
+    if bejegyzes.get("parameterek") == prog["parameterek"]:
+        meresek = [m["perc"] for m in bejegyzes.get("meresek", []) if isinstance(m.get("perc"), int)]
+    if meresek:
+        return round(statistics.median(meresek)), len(meresek)
+    return prog["becsles_perc"], 0
+
+
+def kesleltetes(vege: idopont, perc: int, p, most: datetime | None = None) -> Terv | None:
+    """Mennyi delayTime kell, hogy a program a legközelebbi `vege` időpontig végezzen.
+
+    A delayTime az INDULÁSIG számol, nem a befejezésig: a hOn Home Assistant-
+    integráció „Start Time”-nak hívja, a hOn appban is az indulást lehet
+    megadni, és a két korábbi, appból beállított késleltetés is ezzel egyezik
+    (mindkettő ~14:20-ra időzített indulást adott). Ezért indulás = vége −
+    futásidő. A gép csak lépésközzel (30 perc) fogad késleltetést: lefelé
+    kerekítünk, így legfeljebb egy lépéssel korábban végez, de nem később. Ha
+    ma már nem fér bele, a holnapi időpontra számol. None, ha a gép felső
+    korlátjába (1410 perc) így sem fér bele.
+    """
+    most = most or datetime.now().astimezone()
+    # Az .astimezone() a naiv helyi időt az adott nap saját eltolásával látja
+    # el, így egy közbeeső óraátállítás sem csúsztatja el a számítást.
+    cel = datetime.combine(most.date(), vege).astimezone()
+    if cel - timedelta(minutes=perc) < most:
+        cel = datetime.combine(most.date() + timedelta(days=1), vege).astimezone()
+    nyers = (cel - timedelta(minutes=perc) - most).total_seconds() / 60
+    lepes = int(p.step)
+    keses = max(int(p.min), int(nyers // lepes) * lepes)
+    if keses > p.max:
+        return None
+    # Az újabb .astimezone() az időpontot a saját napja szerinti helyi időben
+    # írja ki, akkor is, ha a késleltetés átnyúlik egy óraátállításon.
+    indulas = (most + timedelta(minutes=keses)).astimezone()
+    nap = "ma" if indulas.date() == most.date() else "holnap"
+    return Terv(keses, indulas, (indulas + timedelta(minutes=perc)).astimezone(), nap)
+
+
 class FelhoValasz(logging.Handler):
     """Elkapja a felhő válaszát, amit a pyhOn csak naplóz, de nem ad vissza.
 
@@ -197,7 +351,7 @@ def felho_hiba(uzenetek: list[str]) -> dict | None:
     return None
 
 
-async def kuldes(cmd, nev: str) -> int:
+async def kuldes(cmd, nev: str, terv: Terv | None = None) -> int:
     """Élesben elküldi a parancsot, és a kimenetet kilépési kódra fordítja.
 
     A felhő válaszát két géppel olvasható sorban írja ki (`FELHO_HIBA:` és
@@ -246,7 +400,11 @@ async def kuldes(cmd, nev: str) -> int:
         naplo.removeHandler(fogo)
 
     if siker:
-        print(f"\nELINDÍTVA: „{nev}”")
+        if terv:
+            print(f"\nBEÁLLÍTVA: „{nev}” — {terv.nap} {terv.indulas:%H:%M}-kor indul, "
+                  f"várható vége {terv.vege:%H:%M}")
+        else:
+            print(f"\nELINDÍTVA: „{nev}”")
         return 0
     print("\nA hitelesítés nem sikerült, a mosás nem indult el.", file=sys.stderr)
     return 4
@@ -260,6 +418,8 @@ async def main() -> int:
                    help="TÉNYLEGESEN elindítja a gépet (enélkül csak próbamenet)")
     p.add_argument("--igen", action="store_true",
                    help="--eles mellett kihagyja a megerősítő kérdést")
+    p.add_argument("--vege", type=idopont_arg, metavar="ÓÓ:PP",
+                   help="késleltetett indítás: úgy indul, hogy erre az időre végezzen")
     args = p.parse_args()
 
     valasztott = PROGRAMOK[args.program]
@@ -293,6 +453,7 @@ async def main() -> int:
                 print(f"    {g.model_name}  {g.mac_address}", file=sys.stderr)
             return 1
         gep = gepek[0]
+        await futasido_tanulas(hon, gep)
 
         keret(f"{gep.brand} {gep.model_name}")
         rendben, uzenet = allapot_ellenorzes(gep)
@@ -301,12 +462,38 @@ async def main() -> int:
         cmd, beallitott, kihagyott = program_beallitasa(gep, valasztott)
         print(f"  Program: „{valasztott['nev']}”  ({valasztott['azonosito']})")
 
+        # A késleltetés ugyanúgy kért paraméter, mint a többi: a visszaolvasás
+        # és az eltérés-ellenőrzés rá is vonatkozik.
+        kert = dict(valasztott["parameterek"])
+        terv = None
+        if args.vege:
+            perc, meresek = futasido(args.program)
+            p_kes = cmd.parameters.get("delayTime")
+            if p_kes is None:
+                print("\nNEM INDÍTOK: ez a program nem ismer késleltetett indítást.",
+                      file=sys.stderr)
+                return 5
+            terv = kesleltetes(args.vege, perc, p_kes)
+            if terv is None:
+                print(f"\nNEM INDÍTOK: {args.vege:%H:%M}-ig nem tud végezni, ehhez "
+                      f"{p_kes.max:g} percnél hosszabb késleltetés kellene.", file=sys.stderr)
+                return 9
+            kert["delayTime"] = terv.keses
+            try:
+                p_kes.value = terv.keses
+            except ValueError as e:
+                kihagyott["delayTime"] = str(e)
+            forras = f"{meresek} mérés mediánja" if meresek else "BECSLÉS, még nincs mérés"
+            print(f"  Késleltetés: {terv.keses} perc — {terv.nap} {terv.indulas:%H:%M}-kor indul, "
+                  f"várható vége {terv.vege:%H:%M} (futásidő {perc} perc, {forras})")
+            # Géppel olvasható sor a mosas.sh-nak: nap, indulás, vége, mérések száma.
+            print(f"KESLELTETES: {terv.nap} {terv.indulas:%H:%M} {terv.vege:%H:%M} {meresek}")
+
         # A ténylegesen visszaolvasott értékeket írjuk ki, nem a beállításkor
         # feljegyzetteket — lásd visszaolvasas() docstringjét.
-        tenylegesek = {k: ertek(cmd.parameters[k])
-                       for k in valasztott["parameterek"] if k in cmd.parameters}
+        tenylegesek = {k: ertek(cmd.parameters[k]) for k in kert if k in cmd.parameters}
         print(f"  Visszaolvasott paraméterek: {tenylegesek}")
-        elteresek = visszaolvasas(cmd, valasztott["parameterek"])
+        elteresek = visszaolvasas(cmd, kert)
         if kihagyott:
             print(f"  FIGYELEM, nem sikerült beállítani: {kihagyott}")
         if elteresek:
@@ -355,7 +542,11 @@ async def main() -> int:
             return 6
 
         if not args.igen:
-            print(f"\nEl fog indulni a(z) „{valasztott['nev']}” program a mosógépen.")
+            if terv:
+                print(f"\nBe fog állni a(z) „{valasztott['nev']}” program: {terv.nap} "
+                      f"{terv.indulas:%H:%M}-kor indul, várható vége {terv.vege:%H:%M}.")
+            else:
+                print(f"\nEl fog indulni a(z) „{valasztott['nev']}” program a mosógépen.")
             try:
                 valasz = input('Megerősítés — írd be, hogy INDIT: ').strip()
             except (EOFError, KeyboardInterrupt):
@@ -378,7 +569,24 @@ async def main() -> int:
             print(f"\nNEM INDÍTOK: az állapot megváltozott. {uzenet_meg}", file=sys.stderr)
             return 2
 
-        return await kuldes(cmd, valasztott["nev"])
+        if terv:
+            # Ugyanezért a késleltetést is a küldés pillanatára számoljuk újra,
+            # különben a megerősítéssel töltött idővel később végezne.
+            uj = kesleltetes(args.vege, perc, cmd.parameters["delayTime"])
+            if uj is None:
+                print(f"\nNEM INDÍTOK: {args.vege:%H:%M}-ig már nem tud végezni.", file=sys.stderr)
+                return 9
+            if uj.keses != terv.keses:
+                cmd.parameters["delayTime"].value = uj.keses
+                if visszaolvasas(cmd, {"delayTime": uj.keses}):
+                    print("\nNEM INDÍTOK: az újraszámolt késleltetést a gép szabályai "
+                          "felülírták.", file=sys.stderr)
+                    return 5
+                print(f"  A késleltetés közben {uj.keses} percre változott.")
+            terv = uj
+            print(f"KESLELTETES: {terv.nap} {terv.indulas:%H:%M} {terv.vege:%H:%M} {meresek}")
+
+        return await kuldes(cmd, valasztott["nev"], terv)
     finally:
         await hon.close()
 

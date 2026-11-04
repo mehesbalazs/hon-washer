@@ -38,6 +38,12 @@ PROGRAMOK = [
     # az SSH-lánc — kulcs, hoszt, útvonal — ellenőrizhető legyen kockázat nélkül.
     {"kulcs": "sotetek", "nev": "próba", "szin": 4274264319, "glif": 59511,
      "mod": " proba", "megerosites": False, "cimke": "Mosás - Próba"},
+    # Késleltetett indítás: úgy indul, hogy a „vege” időpontig végezzen. A
+    # futásidőt az indito.py a korábbi mosásokból méri (lásd futasido_tanulas()).
+    {"kulcs": "sotetek", "nev": "Darks", "szin": 4282601983, "glif": 59511,
+     "mod": " 16:00", "megerosites": True, "cimke": "Mosás Darks 16:00", "vege": "16:00"},
+    {"kulcs": "sanitizer", "nev": "Sanitizer", "szin": 4292093695, "glif": 59511,
+     "mod": " 16:00", "megerosites": True, "cimke": "Mosás Sanitizer 16:00", "vege": "16:00"},
 ]
 
 
@@ -64,13 +70,19 @@ def parancs(program: dict) -> dict:
 
     muveletek = []
     if program["megerosites"]:
+        # Az „-ig” rag minden időponthoz illik, a „-ra/-re” nem.
+        if program.get("vege"):
+            kerdes = (f"Beállítsam a(z) „{program['nev']}” mosást úgy, hogy "
+                      f"{program['vege']}-ig végezzen?")
+        else:
+            kerdes = f"Elindítsam a(z) „{program['nev']}” mosást?"
         # A Mégse megszakítja a parancsot.
         muveletek.append({
             "WFWorkflowActionIdentifier": "is.workflow.actions.alert",
             "WFWorkflowActionParameters": {
                 "WFAlertActionTitle": "Mosógép",
                 "WFAlertActionMessage":
-                    f"Elindítsam a(z) „{program['nev']}” mosást?\n\n"
+                    f"{kerdes}\n\n"
                     "Ellenőrizd, hogy a tárcsa Remote állásban van "
                     "és az ajtó be van csukva.",
                 "WFAlertActionCancelButtonShown": True,

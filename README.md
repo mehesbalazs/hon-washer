@@ -125,8 +125,9 @@ Két rögzített program, a mentett kedvencekből kiolvasott paraméterekkel:
 de elfogja a küldést, így semmi nem jut el a géphez.
 
 ```
-.venv/bin/python indito.py sotetek           # próba
-.venv/bin/python indito.py sotetek --eles    # tényleges indítás
+.venv/bin/python indito.py sotetek                      # próba
+.venv/bin/python indito.py sotetek --eles               # tényleges indítás
+.venv/bin/python indito.py sotetek --vege 16:00 --eles  # késleltetve, 16:00-ig végez
 ```
 
 Éles módban minden alábbi feltételnek teljesülnie kell, különben nem indul:
@@ -145,6 +146,31 @@ Ezután begépelt `INDIT` megerősítést kér, majd **újra ellenőrzi az álla
 mert a megerősítés alatt eltelt idő alatt kinyithatták az ajtót vagy lejárhatott
 a Remote mód. A `--igen` csak a kérdést hagyja ki, az ellenőrzéseket nem.
 
+### Késleltetett indítás — `--vege ÓÓ:PP`
+
+A `--vege 16:00` úgy állítja be a gép késleltetett indítását (`delayTime`), hogy
+a program 16:00-ig végezzen. A gép a `delayTime`-ot **az indulásig** számolja,
+nem a befejezésig: 2026-11-04-én egy 08:21-kor 330 perces késleltetéssel
+beállított Sanitizer percenként fogyó `delayTime` mellett `remainingTimeMM = 104`-et
+jelentett, vagyis a program hosszát. Ezért:
+
+- **indulás = befejezés − futásidő**, 30 perces lépésben lefelé kerekítve — így
+  legfeljebb fél órával korábban végez, de nem később;
+- ha ma már nem fér bele, **holnap** 16:00-ra állít (a gép legfeljebb 1410
+  percet, 23,5 órát tud késleltetni);
+- a megerősítés után, közvetlenül a küldés előtt újraszámol.
+
+**A futásidőt méri, nem becsüli.** A gép előre nem árulja el, mennyi ideig tart
+egy program, indításkor pedig alábecsül (a Darks-ra 77 percet mondott, és 95
+alatt végzett). Ezért az indító minden futáskor megméri a legutóbbi, már
+befejezett mosást: a parancs végrehajtásától, plusz a késleltetéstől addig, amíg
+a ciklus fázisa vissza nem váltott 0-ra. Programonként a legutóbbi 10 mérést a
+`~/.config/hon/futasidok.json` őrzi, és a **mediánjukkal** számol — egy
+szüneteltetett vagy közben kézzel indított mosás így nem húzza el. A hOn appból
+indított mosások is számítanak, ha ugyanazokkal a beállításokkal mentek. Amíg
+egy programhoz nincs mérés, becsült idővel számol (Darks 100, Sanitizer 150
+perc), és ezt a telefon is jelzi: „(becsült futásidővel)”.
+
 ### Kilépési kódok
 
 | kód | jelentés |
@@ -158,24 +184,32 @@ a Remote mód. A `--igen` csak a kérdést hagyja ki, az ellenőrzéseket nem.
 | 6 | a MAC nem egyezik a várt készülékkel |
 | 7 | hálózati hiba küldés közben — **nem tudni, elindult-e**, ellenőrizd |
 | 8 | hiba **a gyártó szerverén** — a mosás **nem** indult el, nem nálad a gond; próbáld később |
+| 9 | a kért befejezési időre nem állítható be (a gép felső korlátjánál hosszabb késleltetés kellene) |
 
 ## iPhone — Parancsok app
 
 A `mosas.sh` egyetlen olvasható sort ad vissza, ezt mutatja a telefon.
 
 ```
-mosas.sh sotetek          # éles indítás
-mosas.sh sanitizer        # éles indítás
-mosas.sh sotetek proba    # próbamenet, nem indít
+mosas.sh sotetek                # éles indítás
+mosas.sh sanitizer              # éles indítás
+mosas.sh sotetek proba          # próbamenet, nem indít
+mosas.sh sotetek 16:00          # késleltetett indítás, 16:00-ig végez
+mosas.sh sotetek 16:00 proba    # ugyanez próbamenetben
 ```
 
-Három parancs készül:
+Öt parancs készül:
 
 | parancs | mit csinál | megerősítést kér |
 |---|---|---|
 | **Mosás Darks** | `mosas.sh sotetek` — éles indítás | igen |
 | **Mosás Sanitizer** | `mosas.sh sanitizer` — éles indítás | igen |
+| **Mosás Darks 16:00** | `mosas.sh sotetek 16:00` — késleltetve, 16:00-ig végez | igen |
+| **Mosás Sanitizer 16:00** | `mosas.sh sanitizer 16:00` — késleltetve, 16:00-ig végez | igen |
 | **Mosás - Próba** | `mosas.sh sotetek proba` — **soha nem indít** | nem |
+
+A késleltetett parancsok válasza megmondja, mikor indul és mikor végez, pl.
+„Beállítva: Darks — ma 14:12-kor indul, várható vége 15:47.”
 
 A próba-parancs az SSH-lánc tesztelésére való: kulcs, hoszt, útvonal, jogosultságok.
 Kockázat nélkül futtatható bármikor, telefonról is.
