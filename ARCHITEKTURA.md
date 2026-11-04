@@ -123,22 +123,40 @@ számol. Az időpontokat az `.astimezone()` a saját napjuk helyi idejében adja
 vissza, így egy közbeeső óraátállítás sem csúsztatja el őket. A késleltetés
 ugyanúgy kért paraméter, mint a többi: a visszaolvasás rá is vonatkozik.
 
-**`futasido_tanulas()` és `futasido()` — a mért futásidő.** A gép a program
-hosszát csak indítás után jelenti (`remainingTimeMM`), és az is alábecslés. A
-valódi futásidőhöz két időbélyeg kell: a legutóbbi `startProgram` parancs
-végrehajtása az előzményből, plusz a késleltetése, és az, amikor a ciklus fázisa
-(`prPhase`) utoljára 0-ra váltott — a felhő minden mezőhöz megőrzi a legutóbbi
-változás idejét. A mérés csak akkor számít, ha a parancs pontosan az egyik
-rögzített program volt, a gép már nem mos és nem vár indulásra, és az eredmény
-20 és 300 perc közé esik. A terv alapja programonként a legutóbbi 10 mérés
-mediánja. Ha egy késleltetett mosás épp a késleltetés lejártakor ért véget,
-figyelmeztet: az arra utalna, hogy a `delayTime` mégis a befejezésig számol.
+**`futasido_tanulas()`, `gepi_becsles()` és `futasido()` — a mért futásidő.**
+A gép a program hosszát csak indításkor becsüli (`remainingTimeMM`), és az
+mindkét irányba téved. A valódi futásidőhöz két időbélyeg kell. A kezdet a
+legutóbbi `startProgram` parancs végrehajtása az előzményből, plusz a
+késleltetése. A vég az, amikor az adott program számlálója utoljára nőtt: a gép
+programonként számolja a befejezett ciklusokat (`program<prPosition>`, a
+Darks-nál `program10`, a Sanitizernél `program14`), és a felhő minden mezőhöz
+megőrzi a legutóbbi változás idejét. A ciklus fázisa (`prPhase`) erre nem jó,
+mert bármelyik mosás vége átírja, így egy utána kézzel indított mosás
+elrontaná a mérést. A számlálót csak ugyanaz a program írja át, és csak
+befejezett ciklus: megszakított, futó vagy indulásra váró mosásnál még az előző
+befejezést mutatja, a különbség negatív, és a mérés kiesik.
+
+Késleltetett indításnál a gép 2–3 perccel a kiszámolt időpont előtt is
+elindulhat (2026-11-04-én 13:49-kor indult a 13:51 helyett). A mérés is ettől a
+kiszámolt időponttól számol, így a terv várható befejezése ugyanúgy stimmel.
+
+A gép indításkori becslését a felhő csak a legutóbbi távoli indításhoz őrzi meg
+(`retrieve-last-activity`), a következő felülírja. A `gepi_becsles()` ezért csak
+akkor fogadja el, ha a program, a késleltetés, a hőfok és a centrifuga is
+egyezik a mért parancséval. Ilyenkor a becslés a mérés mellé kerül
+(`gep_becsles`), és a mérésnek a becslés fele és kétszerese közé kell esnie
+(`HIHETO_ARANY`): így az sem kerül be, ha közben kézzel ugyanez a program is
+lefutott. Ezen felül csak akkor számít a mérés, ha a parancs pontosan az egyik
+rögzített program volt, és az eredmény 20 és 300 perc közé esik. A terv alapja
+programonként a legutóbbi 10 mérés mediánja. Ha egy késleltetett mosás épp a
+késleltetés lejártakor ért véget, figyelmeztet: az arra utalna, hogy a
+`delayTime` mégis a befejezésig számol.
 
 **A `main()` sorrendje**, mert ez adja a tényleges biztonságot:
 
 1. bejelentkezés (hiba esetén lezárja a kapcsolatot, nem szivárog session)
 2. mosógép kiválasztása — **több gépnél inkább nem indít**, hanem kilistázza
-   őket —, majd a legutóbbi mosás futásidejének mérése
+   őket —, majd a legutóbbi távoli mosás futásidejének mérése
 3. állapotellenőrzés
 4. program és paraméterek beállítása — `--vege` esetén a késleltetéssel együtt —,
    majd visszaolvasás

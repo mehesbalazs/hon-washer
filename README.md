@@ -161,15 +161,24 @@ jelentett, vagyis a program hosszát. Ezért:
 - a megerősítés után, közvetlenül a küldés előtt újraszámol.
 
 **A futásidőt méri, nem becsüli.** A gép előre nem árulja el, mennyi ideig tart
-egy program, indításkor pedig alábecsül (a Darks-ra 77 percet mondott, és 95
-alatt végzett). Ezért az indító minden futáskor megméri a legutóbbi, már
-befejezett mosást: a parancs végrehajtásától, plusz a késleltetéstől addig, amíg
-a ciklus fázisa vissza nem váltott 0-ra. Programonként a legutóbbi 10 mérést a
-`~/.config/hon/futasidok.json` őrzi, és a **mediánjukkal** számol — egy
-szüneteltetett vagy közben kézzel indított mosás így nem húzza el. A hOn appból
-indított mosások is számítanak, ha ugyanazokkal a beállításokkal mentek. Amíg
-egy programhoz nincs mérés, becsült idővel számol (Darks 100, Sanitizer 150
-perc), és ezt a telefon is jelzi: „(becsült futásidővel)”.
+egy program, az indításkori becslése pedig mindkét irányba téved: a Darks-ra 77
+percet mondott, és 95 alatt végzett, a Sanitizerre 104-et, és szintén 95 alatt.
+Ezért az indító minden futáskor megméri a legutóbbi, már befejezett távoli
+mosást: a parancs végrehajtásától, plusz a késleltetéstől addig, amíg az adott
+program számlálója utoljára nőtt. A gép ugyanis programonként számolja a
+befejezett ciklusokat, és a felhő megőrzi, mikor nőtt utoljára a számláló. Így
+egy közben kézzel indított, másik programos mosás nem rontja el a mérést.
+
+Ha a gép indításkori becslése még megvan a felhőben, azt is elteszi a mérés
+mellé, és a mérést csak akkor fogadja el, ha a becslés fele és kétszerese közé
+esik — így az sem kerül be, ha közben kézzel ugyanez a program is lefutott.
+
+Programonként a legutóbbi 10 mérést a `~/.config/hon/futasidok.json` őrzi
+(kezdet, mért perc, a gép becslése), és a **mediánjukkal** számol, így egy
+szokatlanul hosszú mosás nem húzza el. A hOn appból indított mosások is
+számítanak, ha ugyanazokkal a beállításokkal mentek. Amíg egy programhoz nincs
+mérés, becsült idővel számol (Darks 100, Sanitizer 150 perc), és ezt a telefon
+is jelzi: „(becsült futásidővel)”.
 
 ### Kilépési kódok
 

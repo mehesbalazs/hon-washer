@@ -53,6 +53,9 @@ PROGRAMOK = {
 # 77 percet mondott, és 95 alatt végzett. Ezért a tényleges futásokat mérjük.
 FUTASIDO_FAJL = Path.home() / ".config" / "hon" / "futasidok.json"
 MERESEK_SZAMA = 10
+# Egy mérés akkor hihető, ha a gép indításkori becslésének a fele és a
+# kétszerese közé esik. Az első két mérésnél az arány 0,88 és 1,23 volt.
+HIHETO_ARANY = (0.5, 2.0)
 
 
 class Proba:
@@ -192,9 +195,14 @@ def futasidok() -> dict:
         return {}
 
 
+def program_azonosito(program_nev) -> str:
+    """'PROGRAMS.WM_WD.IOT_WASH_DARK' és 'IOT_WASH_DARK' egyaránt: 'iot_wash_dark'."""
+    return str(program_nev or "").rsplit(".", 1)[-1].lower()
+
+
 def melyik_program(program_nev: str, parameterek: dict) -> str | None:
     """A PROGRAMOK kulcsa, ha a parancs pontosan az egyik rögzített program volt."""
-    azonosito = program_nev.rsplit(".", 1)[-1].lower()
+    azonosito = program_azonosito(program_nev)
     for kulcs, prog in PROGRAMOK.items():
         if prog["azonosito"] == azonosito and all(
                 clean_value(parameterek.get(k, "")) == clean_value(v)
@@ -203,15 +211,51 @@ def melyik_program(program_nev: str, parameterek: dict) -> str | None:
     return None
 
 
+async def gepi_becsles(hon, gep, parancs: dict) -> int | None:
+    """A gép saját becslése (perc) a parancs indításakor, ha még megvan.
+
+    A felhő a legutóbbi távoli indítást a gép akkori állapotával együtt őrzi
+    (retrieve-last-activity), ebben a remainingTimeMM a gép becslése. A
+    következő távoli indítás felülírja, ezért csak akkor fogadjuk el, ha a
+    program, a késleltetés, a hőfok és a centrifuga is egyezik a mért
+    parancséval.
+    """
+    try:
+        aktivitas = await hon.api.load_last_activity(gep)
+    except Exception:
+        return None
+    if not isinstance(aktivitas, dict):
+        return None
+    parameterek = parancs.get("parameters", {})
+    if program_azonosito(aktivitas.get("programName")) != program_azonosito(
+            parancs.get("programName")):
+        return None
+    if any(clean_value(aktivitas.get(k, "")) != clean_value(parameterek.get(k, ""))
+           for k in ("delayTime", "temp", "spinSpeed")):
+        return None
+    try:
+        perc = int(float(aktivitas.get("remainingTimeMM") or 0))
+    except (TypeError, ValueError):
+        return None
+    return perc if perc > 0 else None
+
+
 async def futasido_tanulas(hon, gep) -> None:
-    """Megméri a legutóbbi, már befejeződött mosás tényleges futásidejét.
+    """Megméri a legutóbbi, már befejeződött távoli mosás tényleges futásidejét.
 
     Kezdet: a legutóbbi startProgram parancs végrehajtásának ideje, plusz a
-    késleltetése. Vég: amikor a ciklus fázisa (prPhase) utoljára 0-ra váltott —
-    a felhő minden mezőhöz megőrzi a legutóbbi változás idejét. Csak a két
-    rögzített program számít, ugyanazokkal a beállításokkal, és csak a 20–300
-    perc közötti eredmény: egy közben kézzel indított vagy szüneteltetett mosás
-    így legfeljebb egy kiugró mérés, amit a futasido() mediánja elnyel.
+    késleltetése. Vég: amikor az adott program számlálója utoljára nőtt. A gép
+    programonként számolja a befejezett ciklusokat (program<prPosition>: a
+    Darks a program10, a Sanitizer a program14), és a felhő minden mezőhöz
+    megőrzi a legutóbbi változás idejét. Ezért egy közben kézzel indított,
+    másik programos mosás nem rontja el a mérést, egy megszakított mosás pedig
+    nem számít, mert a számlálója nem nő.
+
+    Csak a két rögzített program számít, ugyanazokkal a beállításokkal, és csak
+    a 20–300 perc közötti eredmény. Ha a gép indításkori becslése még megvan,
+    azt is eltesszük, és a mérésnek a HIHETO_ARANY szerinti sávba kell esnie:
+    így az sem kerül be, ha közben kézzel ugyanezt a programot is lefuttattad
+    (az órákkal később ér véget).
     """
     try:
         elozmeny = await hon.api.load_command_history(gep) or []
@@ -225,17 +269,28 @@ async def futasido_tanulas(hon, gep) -> None:
     parancs = utolso["command"]
     parameterek = parancs.get("parameters", {})
     kulcs = melyik_program(parancs.get("programName", ""), parameterek)
-    attr = (gep.attributes or {}).get("parameters", {})
-    fazis = attr.get("prPhase")
-    if kulcs is None or fazis is None or ertek(fazis) != "0" or fazis.last_update is None:
+    if kulcs is None:
         return
-    if ertek(attr.get("machMode", "")) in ("2", "3", "4", "5"):
-        return  # még fut, szünetel vagy a késleltetett indulásra vár
 
     vegrehajtva = datetime.fromisoformat(utolso["timestampExecuted"])
     keses = int(float(parameterek.get("delayTime") or 0))
     kezdet = vegrehajtva + timedelta(minutes=keses)
-    perc = round((fazis.last_update - kezdet).total_seconds() / 60)
+    adat = futasidok()
+    bejegyzes = adat.get(kulcs, {})
+    if bejegyzes.get("parameterek") != PROGRAMOK[kulcs]["parameterek"]:
+        bejegyzes = {"parameterek": PROGRAMOK[kulcs]["parameterek"], "meresek": []}
+    azon = kezdet.isoformat(timespec="seconds")
+    if any(m.get("kezdet") == azon for m in bejegyzes["meresek"]):
+        return  # ezt a mosást már megmértük
+
+    szamlalo = (gep.attributes or {}).get("parameters", {}).get(
+        f"program{parameterek.get('prPosition', '')}")
+    vege = getattr(szamlalo, "last_update", None)
+    if vege is None:
+        return  # nincs programszámláló, így nem tudni biztosan, mikor ért véget
+    # Futó vagy késleltetésre váró mosásnál a számláló még az előző befejezést
+    # mutatja: a különbség negatív, és a mérés kiesik.
+    perc = round((vege - kezdet).total_seconds() / 60)
     if not 20 <= perc <= 300:
         if keses and abs(perc) < 20:
             # Ha a delayTime a befejezésig számolna, a mosás épp a késleltetés
@@ -245,27 +300,30 @@ async def futasido_tanulas(hon, gep) -> None:
                   file=sys.stderr)
         return
 
-    adat = futasidok()
-    bejegyzes = adat.get(kulcs, {})
-    if bejegyzes.get("parameterek") != PROGRAMOK[kulcs]["parameterek"]:
-        bejegyzes = {"parameterek": PROGRAMOK[kulcs]["parameterek"], "meresek": []}
-    azon = kezdet.isoformat(timespec="seconds")
-    if any(m.get("kezdet") == azon for m in bejegyzes["meresek"]):
-        return  # ezt a mosást már megmértük
-    bejegyzes["meresek"] = (bejegyzes["meresek"] + [{"kezdet": azon, "perc": perc}])[-MERESEK_SZAMA:]
+    becsles = await gepi_becsles(hon, gep, parancs)
+    if becsles and not HIHETO_ARANY[0] * becsles <= perc <= HIHETO_ARANY[1] * becsles:
+        print(f"  (nem mérés: {perc} perc jött ki, a gép {becsles} percet becsült — "
+              f"valószínűleg közben kézzel is lefutott ugyanez a program)", file=sys.stderr)
+        return
+
+    meres = {"kezdet": azon, "perc": perc}
+    if becsles:
+        meres["gep_becsles"] = becsles
+    bejegyzes["meresek"] = (bejegyzes["meresek"] + [meres])[-MERESEK_SZAMA:]
     adat[kulcs] = bejegyzes
     FUTASIDO_FAJL.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     FUTASIDO_FAJL.write_text(json.dumps(adat, ensure_ascii=False, indent=2) + "\n",
                              encoding="utf-8")
-    print(f"  futásidő megjegyezve: {PROGRAMOK[kulcs]['nev']} {perc} perc "
+    gepe = f", a gép {becsles} percet becsült" if becsles else ""
+    print(f"  futásidő megjegyezve: {PROGRAMOK[kulcs]['nev']} {perc} perc{gepe} "
           f"({len(bejegyzes['meresek'])} mérés)", file=sys.stderr)
 
 
 def futasido(kulcs: str) -> tuple[int, int]:
     """A program várható hossza percben, és hány mérésből jön (0: becslés).
 
-    Medián, nem számtani átlag: egy szüneteltetett vagy közben kézzel indított
-    mosás kiugró mérése így nem húzza el a tervet.
+    Medián, nem számtani átlag: egy szokatlanul hosszú — például
+    szüneteltetett — mosás mérése így nem húzza el a tervet.
     """
     prog = PROGRAMOK[kulcs]
     bejegyzes = futasidok().get(kulcs, {})
